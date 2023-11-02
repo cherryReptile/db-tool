@@ -9,9 +9,11 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/term"
 	"log"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 type creds struct {
@@ -112,11 +114,11 @@ func getCreds() (*creds, error) {
 		err         error
 	)
 
-	if credentials.host, err = paramReader("please specify host: "); err != nil {
+	if credentials.host, err = paramReader("host"); err != nil {
 		return nil, err
 	}
 
-	portStr, err := paramReader("please specify port: ")
+	portStr, err := paramReader("port")
 	if err != nil {
 		return nil, err
 	}
@@ -125,15 +127,15 @@ func getCreds() (*creds, error) {
 		return nil, err
 	}
 
-	if credentials.user, err = paramReader("please specify user: "); err != nil {
+	if credentials.user, err = paramReader("user"); err != nil {
 		return nil, err
 	}
 
-	if credentials.password, err = paramReader("please specify password: "); err != nil {
+	if credentials.password, err = paramReader("password"); err != nil {
 		return nil, err
 	}
 
-	if credentials.dbname, err = paramReader("please specify db name: "); err != nil {
+	if credentials.dbname, err = paramReader("db_name"); err != nil {
 		return nil, err
 	}
 
@@ -153,7 +155,20 @@ func paramReader(msg string) (string, error) {
 			return "", errors.New("too much tries")
 		}
 
-		fmt.Print(msg)
+		fmt.Print(
+			fmt.Sprintf("please specify %s: ", msg),
+		)
+
+		if msg == "password" || msg == "user" {
+			byteInput, err := term.ReadPassword(syscall.Stdin)
+			if err != nil {
+				return "", err
+			}
+
+			fmt.Println()
+
+			return string(byteInput), nil
+		}
 
 		if _, err := fmt.Scanln(&input); err != nil {
 			if err.Error() == "unexpected newline" {
@@ -224,10 +239,10 @@ func findSequences(db *sql.DB, schema string) ([]info, error) {
 	query := fmt.Sprintf(`
 	select table_name, column_name, column_default
 		from information_schema.columns
-	where column_default like 'nextval%s' and table_schema = '%s'
-	`, "%", schema)
+	where column_default like 'nextval%s' and table_schema = $1
+	`, "%")
 
-	rows, err := db.Query(query)
+	rows, err := db.Query(query, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -283,6 +298,7 @@ func findRepeats(db *sql.DB, seq info, schema string) ([]info, error) {
 
 		if rowsCount > 1 {
 			var dupSeq info
+
 			if err = rowsSequences.Scan(&dupSeq.tableName, &dupSeq.columnName, &dupSeq.columnDefault); err != nil {
 				return nil, err
 			}
